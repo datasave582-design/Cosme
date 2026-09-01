@@ -390,6 +390,16 @@
 <div class="toast-wrap" id="toast-wrap"></div>
 
 <script>
+/* Boot safety: if an old browser/cache blocks app startup, show a useful message instead of a blank card. */
+window.__vikaasoftBootStarted = Date.now();
+window.addEventListener('error', function(e){
+  console.error('Vikaasofttech boot error:', e.error || e.message);
+  var box = document.getElementById('login-content');
+  if (box && !box.innerHTML.trim()) box.innerHTML = '<div class="login-error">App startup error. Please refresh once or clear this site cache, then open again.</div><button class="btn primary" style="width:100%;margin-top:8px" onclick="location.reload()">↻ Refresh App</button>';
+});
+</script>
+
+<script>
 /* ============================================================
    VIKAASOFTTECH — DATA LAYER (IndexedDB)
    ============================================================ */
