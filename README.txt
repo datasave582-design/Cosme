@@ -1,33 +1,25 @@
-VIKAASOFTTECH COSMETICS PRO
-============================
+Vikaasofttech Cosmetics Shop Management — Professional Inventory Edition
 
-PC APP-STYLE LAUNCH
--------------------
-1. Extract this folder.
-2. On Windows with Python installed, double-click START_Vikaasofttech.bat.
-3. It opens the app in Microsoft Edge/Chrome app-style mode.
-4. First run: create the admin username and password.
+Features:
+- Direct open, no password
+- Fast product entry
+- Manual category management
+- Inventory filters/search
+- Low/out-of-stock and expiry tracking
+- Stock overview and valuation
+- Stock movement history
+- Stock adjustment and reorder attention
+- Barcode-ready POS billing (USB scanner acts as keyboard input)
+- GST, discount, payment method and invoice printing
+- Sales history
+- Reports with Print + CSV Download
+- Product/stock/expiry reports with Print + CSV Download
+- Backup and restore JSON
+- Responsive mobile and PC UI
+- PWA/service worker for HTTPS hosting
 
-BILLING + BARCODE
------------------
-- Connect a USB barcode scanner to the PC.
-- Open New Sale.
-- Scan a product barcode. The scanner normally types the code and sends Enter.
-- Matching product is added automatically.
-- Scan the same barcode again to increase quantity.
-- Stock is checked before adding/selling.
-- Complete Sale reduces stock and creates an invoice.
-- Print the invoice from the completed-sale window.
+GitHub Pages:
+Upload the files from this folder to the repository root (not the ZIP). Enable GitHub Pages from Settings > Pages.
 
-IMPORTANT
----------
-This is a local-first browser application using IndexedDB. The login password is
-stored as a salted PBKDF2-SHA-256 hash. Keep regular JSON backups. For multi-PC,
-cloud sync, user roles, remote backup, or server-side security, a backend is needed.
-
-FILES
------
-index.html              Main application
-manifest.webmanifest    PWA metadata
-sw.js                   Service worker
-START_Vikaasofttech.bat PC app-style launcher
+Windows PC:
+Run START_Vikaasofttech.bat to start a local server and open the app.

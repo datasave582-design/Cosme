@@ -1,4 +1,4 @@
-const CACHE = 'vikaasofttech-v3';
+const CACHE = 'vikaasofttech-v4';
 const ASSETS = ['./', './index.html', './manifest.webmanifest'];
 
 self.addEventListener('install', event => {

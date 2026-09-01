@@ -332,15 +332,9 @@
 </head>
 <body>
 
-<div class="login-screen" id="login-screen">
-  <div class="login-card">
-    <div class="login-brand"><div class="login-mark">V</div><div><h1>Vikaasofttech</h1><p>Cosmetics Shop Management</p></div></div>
-    <div id="login-content"></div>
-    <div class="login-foot">Local secure login • Password is stored as a cryptographic hash<br>Keep regular backups of your shop data.</div>
-  </div>
-</div>
 
-<div id="app" style="display:none;">
+
+<div id="app" style="display:flex;">
   <aside class="sidebar">
     <div class="brand">
       <div class="brand-mark">Vikaasofttech</div>
@@ -358,6 +352,9 @@
       <div class="nav-item" data-view="low-stock"><span class="nav-icon">🟡</span>Low Stock<span class="badge" id="nav-badge-low">0</span></div>
       <div class="nav-item" data-view="out-of-stock"><span class="nav-icon">🔴</span>Out of Stock<span class="badge" id="nav-badge-out">0</span></div>
       <div class="nav-item" data-view="expiry"><span class="nav-icon">⏰</span>Expiry</div>
+      <div class="nav-item" data-view="stock-overview"><span class="nav-icon">📈</span>Stock Overview</div>
+      <div class="nav-item" data-view="stock-movement"><span class="nav-icon">🔄</span>Stock Movement</div>
+      <div class="nav-item" data-view="categories"><span class="nav-icon">🏷️</span>Categories</div>
     </div>
     <div class="nav-group">
       <div class="nav-label">MANAGEMENT</div>
@@ -389,22 +386,14 @@
 <div id="modal-root"></div>
 <div class="toast-wrap" id="toast-wrap"></div>
 
-<script>
-/* Boot safety: if an old browser/cache blocks app startup, show a useful message instead of a blank card. */
-window.__vikaasoftBootStarted = Date.now();
-window.addEventListener('error', function(e){
-  console.error('Vikaasofttech boot error:', e.error || e.message);
-  var box = document.getElementById('login-content');
-  if (box && !box.innerHTML.trim()) box.innerHTML = '<div class="login-error">App startup error. Please refresh once or clear this site cache, then open again.</div><button class="btn primary" style="width:100%;margin-top:8px" onclick="location.reload()">↻ Refresh App</button>';
-});
-</script>
+
 
 <script>
 /* ============================================================
    VIKAASOFTTECH — DATA LAYER (IndexedDB)
    ============================================================ */
 const DB_NAME = "vikaasofttech_db";
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 let db;
 
 function openDB(){
@@ -417,6 +406,7 @@ function openDB(){
       if(!_db.objectStoreNames.contains('customers')) _db.createObjectStore('customers', {keyPath:'id'});
       if(!_db.objectStoreNames.contains('suppliers')) _db.createObjectStore('suppliers', {keyPath:'id'});
       if(!_db.objectStoreNames.contains('meta')) _db.createObjectStore('meta', {keyPath:'key'});
+      if(!_db.objectStoreNames.contains('stockMoves')) _db.createObjectStore('stockMoves', {keyPath:'id'});
     };
     req.onsuccess = (e) => { db = e.target.result; resolve(db); };
     req.onerror = (e) => reject(e);
@@ -476,6 +466,7 @@ let STATE = {
   sales: [],
   customers: [],
   suppliers: [],
+  stockMoves: [],
   settings: {},
   view: 'dashboard',
   cart: [],           // {productId, name, qty, rate, mrp}
@@ -540,6 +531,9 @@ function render(){
     case 'low-stock': return renderStockList('low');
     case 'out-of-stock': return renderStockList('out');
     case 'expiry': return renderExpiry();
+    case 'stock-overview': return renderStockOverview();
+    case 'stock-movement': return renderStockMovement();
+    case 'categories': return renderCategories();
     case 'customers': return renderCustomers();
     case 'suppliers': return renderSuppliers();
     case 'reports': return renderReports();
@@ -707,7 +701,7 @@ function closeModal(){
   document.getElementById('modal-root').innerHTML = '';
 }
 
-const CATEGORY_OPTIONS = ["Skincare","Makeup","Haircare","Fragrance","Personal Care","Tools & Accessories","Other"];
+let CATEGORY_OPTIONS = ["Skincare","Makeup","Haircare","Fragrance","Personal Care","Tools & Accessories","Other"];
 
 function openFastAdd(){
   const s = STATE.settings;
@@ -1502,7 +1496,7 @@ function renderBackup(){
   document.getElementById('backup-export').addEventListener('click', async ()=>{
     const data = {
       products: STATE.products, sales: STATE.sales, customers: STATE.customers,
-      suppliers: STATE.suppliers, settings: STATE.settings, exportedAt: new Date().toISOString()
+      suppliers: STATE.suppliers, stockMoves: STATE.stockMoves, settings: STATE.settings, exportedAt: new Date().toISOString()
     };
     const blob = new Blob([JSON.stringify(data,null,2)], {type:'application/json'});
     const url = URL.createObjectURL(blob);
@@ -1522,6 +1516,7 @@ function renderBackup(){
       for(const s of (data.sales||[])) await idbPut('sales', s);
       for(const c of (data.customers||[])) await idbPut('customers', c);
       for(const su of (data.suppliers||[])) await idbPut('suppliers', su);
+      for(const m of (data.stockMoves||[])) await idbPut('stockMoves', m);
       if(data.settings) await saveSettings(data.settings);
       await loadAll();
       toast('Backup restored', 'ok');
@@ -1538,29 +1533,25 @@ function renderBackup(){
 function renderSettings(){
   const s = STATE.settings;
   viewRoot.innerHTML = `
-    <h1 class="page-title">⚙️ Settings</h1><div class="page-sub">Shop preferences and security</div>
+    <h1 class="page-title">⚙️ Settings</h1><div class="page-sub">Shop preferences</div>
     <div class="section-card" style="max-width:640px;">
       <div class="field"><label>Shop Name</label><input id="set-shopname" value="${escapeHtml(s.shopName||'')}"></div>
       <div class="field-row"><div class="field"><label>Currency Symbol</label><input id="set-currency" value="${escapeHtml(s.currency||'₹')}"></div><div class="field"><label>Default GST (%)</label><input id="set-gst" type="number" min="0" max="100" value="${s.defaultGst||0}"></div></div>
       <div class="field"><label><input type="checkbox" id="set-gstenabled" ${s.gstEnabled?'checked':''} style="width:auto;margin-right:6px;">Apply GST on sales</label></div>
       <div class="btn-row"><button class="btn primary" id="set-save">Save Settings</button></div>
     </div>
-    <div class="section-card security-card">
-      <div class="section-head"><h2>🔐 Security</h2><button class="btn" id="settings-lock">Lock Now</button></div>
-      <p class="security-note">Your login password is stored locally as a salted PBKDF2-SHA-256 hash. The password itself is never saved. Auto-lock is enabled after 30 minutes of inactivity.</p>
-      <div class="field-row"><div class="field"><label>Current Password</label><input id="sec-current" type="password"></div><div class="field"><label>New Password</label><input id="sec-new" type="password" minlength="8"></div></div>
-      <div class="field"><label>Confirm New Password</label><input id="sec-new2" type="password" minlength="8"></div>
-      <div class="btn-row"><button class="btn primary" id="sec-change">Change Password</button></div>
+    <div class="section-card security-card" style="max-width:640px;">
+      <div class="section-head"><h2>⚡ Quick Access</h2></div>
+      <p class="security-note">Password login is disabled. The software opens directly for fast shop use.</p>
     </div>`;
-  document.getElementById('set-save').addEventListener('click',async()=>{STATE.settings.shopName=document.getElementById('set-shopname').value.trim();STATE.settings.currency=document.getElementById('set-currency').value.trim()||'₹';STATE.settings.defaultGst=parseFloat(document.getElementById('set-gst').value)||0;STATE.settings.gstEnabled=document.getElementById('set-gstenabled').checked;await saveSettings(STATE.settings);toast('Settings saved','ok');render();});
-  document.getElementById('settings-lock').addEventListener('click',lockApp);
-  document.getElementById('sec-change').addEventListener('click',async()=>{
-    const cur=document.getElementById('sec-current').value,n=document.getElementById('sec-new').value,n2=document.getElementById('sec-new2').value;
-    const auth=await getAuth();
-    if(!(await verifyAuth(auth.value.username,cur))){toast('Current password is incorrect','danger');return;}
-    if(n.length<8||!/[A-Za-z]/.test(n)||!/[0-9]/.test(n)){toast('New password needs 8+ chars with a letter and number','danger');return;}
-    if(n!==n2){toast('New passwords do not match','danger');return;}
-    await createAuth(auth.value.username,n);window.__AUTH_CACHE=await getAuth();document.getElementById('sec-current').value='';document.getElementById('sec-new').value='';document.getElementById('sec-new2').value='';toast('Password changed successfully','ok');
+  document.getElementById('set-save').addEventListener('click',async()=>{
+    STATE.settings.shopName=document.getElementById('set-shopname').value.trim();
+    STATE.settings.currency=document.getElementById('set-currency').value.trim()||'₹';
+    STATE.settings.defaultGst=parseFloat(document.getElementById('set-gst').value)||0;
+    STATE.settings.gstEnabled=document.getElementById('set-gstenabled').checked;
+    await saveSettings(STATE.settings);
+    toast('Settings saved','ok');
+    render();
   });
 }
 
@@ -1603,7 +1594,6 @@ document.addEventListener('keydown', (e)=>{
 });
 
 document.getElementById('fast-add-btn').addEventListener('click', openFastAdd);
-document.getElementById('lock-btn').addEventListener('click', lockApp);
 
 /* ============================================================
    CLOCK
@@ -1614,91 +1604,115 @@ function tickClock(){
 setInterval(tickClock, 1000*30);
 
 /* ============================================================
-   SECURE LOGIN / AUTHENTICATION
+   PROFESSIONAL INVENTORY EXTENSIONS
    ============================================================ */
-const AUTH_ITERATIONS = 150000;
-const AUTH_TIMEOUT_MS = 30 * 60 * 1000;
-let lastActivity = Date.now();
+function downloadText(filename, text, type='text/plain;charset=utf-8'){
+  const blob = new Blob([text], {type}); const url = URL.createObjectURL(blob);
+  const a=document.createElement('a'); a.href=url; a.download=filename; a.click();
+  setTimeout(()=>URL.revokeObjectURL(url),500);
+}
+function csvCell(v){ const x=String(v??''); return '"'+x.replace(/"/g,'""')+'"'; }
+function downloadCSV(filename, headers, rows){
+  const csv=[headers, ...rows].map(r=>r.map(csvCell).join(',')).join('\n');
+  downloadText(filename, '\ufeff'+csv, 'text/csv;charset=utf-8');
+}
+function reportButtons(id, printFn, csvFn){
+  return `<div class="btn-row" style="justify-content:flex-end;margin:0 0 12px;">`+
+    `<button class="btn" id="${id}-print">🖨️ Print</button><button class="btn" id="${id}-download">⬇️ Download CSV</button></div>`;
+}
+function wireReportButtons(id, printFn, csvFn){
+  document.getElementById(id+'-print')?.addEventListener('click',printFn);
+  document.getElementById(id+'-download')?.addEventListener('click',csvFn);
+}
+function stockRows(list){ return list.map(p=>[p.name,p.brand||'',p.category||'',p.barcode||'',p.stock,p.minStock,p.unit||'',p.purchasePrice||0,p.sellingPrice||0,(p.stock*(p.purchasePrice||0)).toFixed(2),stockStatus(p)==='out'?'Out of Stock':stockStatus(p)==='low'?'Low Stock':'In Stock']); }
+function downloadStockCSV(list=STATE.products){ downloadCSV(`stock-report-${todayStr()}.csv`,['Product','Brand','Category','Barcode','Stock','Min Stock','Unit','Purchase Price','Selling Price','Stock Cost Value','Status'],stockRows(list)); toast('Stock report downloaded','ok'); }
+function printStockReport(list=STATE.products){ printFilteredStock(list); }
 
-function b64(bytes){ return btoa(String.fromCharCode(...new Uint8Array(bytes))); }
-function unb64(str){ return Uint8Array.from(atob(str), c=>c.charCodeAt(0)); }
-async function hashPassword(password, salt){
-  const enc = new TextEncoder();
-  const key = await crypto.subtle.importKey('raw', enc.encode(password), 'PBKDF2', false, ['deriveBits']);
-  const bits = await crypto.subtle.deriveBits({name:'PBKDF2',salt,iterations:AUTH_ITERATIONS,hash:'SHA-256'}, key, 256);
-  return new Uint8Array(bits);
+function renderStockOverview(){
+  const totalUnits=STATE.products.reduce((a,p)=>a+Number(p.stock||0),0);
+  const cost=STATE.products.reduce((a,p)=>a+Number(p.stock||0)*Number(p.purchasePrice||0),0);
+  const retail=STATE.products.reduce((a,p)=>a+Number(p.stock||0)*Number(p.sellingPrice||0),0);
+  const low=STATE.products.filter(p=>stockStatus(p)==='low'), out=STATE.products.filter(p=>stockStatus(p)==='out');
+  const rows=STATE.products.slice().sort((a,b)=>Number(b.stock)-Number(a.stock));
+  viewRoot.innerHTML=`<h1 class="page-title">📈 Stock Overview</h1><div class="page-sub">Complete inventory position and valuation</div>
+  <div class="cards-row" style="grid-template-columns:repeat(4,1fr);"><div class="stat-card"><div class="label">Products</div><div class="value">${STATE.products.length}</div></div><div class="stat-card ok"><div class="label">Total Units</div><div class="value">${totalUnits}</div></div><div class="stat-card brand"><div class="label">Cost Value</div><div class="value">${fmtMoney(cost)}</div></div><div class="stat-card warn"><div class="label">Retail Value</div><div class="value">${fmtMoney(retail)}</div></div></div>
+  ${reportButtons('sto',()=>printStockReport(rows),()=>downloadStockCSV(rows))}
+  <div class="section-card"><div class="section-head"><h2>Reorder / Attention</h2><span>${low.length} low · ${out.length} out</span></div><table><thead><tr><th>Product</th><th>Category</th><th>Stock</th><th>Min</th><th>Status</th><th>Action</th></tr></thead><tbody>${rows.map(p=>`<tr><td>${escapeHtml(p.name)}</td><td>${escapeHtml(p.category||'-')}</td><td><b>${p.stock}</b></td><td>${p.minStock}</td><td>${stockStatus(p)==='out'?'<span class="pill danger">OUT</span>':stockStatus(p)==='low'?'<span class="pill warn">LOW</span>':'<span class="pill ok">OK</span>'}</td><td><button class="btn" data-stock-id="${p.id}">📦 Adjust</button></td></tr>`).join('')}</tbody></table></div>`;
+  wireReportButtons('sto',()=>printStockReport(rows),()=>downloadStockCSV(rows));
+  viewRoot.querySelectorAll('[data-stock-id]').forEach(b=>b.onclick=()=>openStockAdjust(b.dataset.stockId));
 }
-function timingSafeEqual(a,b){
-  if(a.length!==b.length) return false;
-  let x=0; for(let i=0;i<a.length;i++) x|=a[i]^b[i]; return x===0;
+function renderStockMovement(){
+  const moves=[...(STATE.stockMoves||[])].sort((a,b)=>String(b.date).localeCompare(String(a.date)));
+  viewRoot.innerHTML=`<h1 class="page-title">🔄 Stock Movement</h1><div class="page-sub">Every stock increase, decrease and sale adjustment</div>
+  ${reportButtons('stm',()=>printStockMovement(moves),()=>downloadStockMovement(moves))}
+  <div class="section-card"><div class="section-head"><h2>Movement History</h2><input id="movement-search" class="filter-input" placeholder="Search product / reason..."></div><div id="movement-table"></div></div>`;
+  const draw=()=>{ const q=(document.getElementById('movement-search').value||'').toLowerCase(); const list=moves.filter(m=>(m.productName+' '+m.reason+' '+(m.barcode||'')).toLowerCase().includes(q)); document.getElementById('movement-table').innerHTML=list.length?`<table><thead><tr><th>Date</th><th>Product</th><th>Type</th><th>Qty</th><th>Before</th><th>After</th><th>Reason</th></tr></thead><tbody>${list.map(m=>`<tr><td>${new Date(m.date).toLocaleString('en-IN')}</td><td>${escapeHtml(m.productName)}</td><td>${m.type}</td><td>${m.qty}</td><td>${m.before}</td><td>${m.after}</td><td>${escapeHtml(m.reason||'-')}</td></tr>`).join('')}</tbody></table>`:'<div class="empty-state">No stock movement yet.</div>';};
+  draw(); document.getElementById('movement-search').oninput=draw; wireReportButtons('stm',()=>printStockMovement(moves),()=>downloadStockMovement(moves));
 }
-async function getAuth(){ return await idbGet('meta','auth'); }
-async function createAuth(username,password){
-  const salt=crypto.getRandomValues(new Uint8Array(16));
-  const hash=await hashPassword(password,salt);
-  await idbPut('meta',{key:'auth',value:{username, salt:b64(salt), hash:b64(hash), createdAt:new Date().toISOString()}});
+function downloadStockMovement(moves){ downloadCSV(`stock-movement-${todayStr()}.csv`,['Date','Product','Barcode','Type','Quantity','Before','After','Reason'],moves.map(m=>[m.date,m.productName,m.barcode||'',m.type,m.qty,m.before,m.after,m.reason||''])); toast('Movement report downloaded','ok'); }
+function printStockMovement(moves){ printHtml(`<h2 style="text-align:center">${escapeHtml(STATE.settings.shopName||'Vikaasofttech Cosmetics')}</h2><p style="text-align:center">Stock Movement Report — ${new Date().toLocaleDateString('en-IN')}</p><table><thead><tr><th>Date</th><th>Product</th><th>Type</th><th>Qty</th><th>Before</th><th>After</th><th>Reason</th></tr></thead><tbody>${moves.map(m=>`<tr><td>${new Date(m.date).toLocaleString('en-IN')}</td><td>${escapeHtml(m.productName)}</td><td>${m.type}</td><td>${m.qty}</td><td>${m.before}</td><td>${m.after}</td><td>${escapeHtml(m.reason||'-')}</td></tr>`).join('')}</tbody></table>`); }
+
+function renderCategories(){
+  const cats=[...CATEGORY_OPTIONS];
+  viewRoot.innerHTML=`<h1 class="page-title">🏷️ Categories</h1><div class="page-sub">Create and manage your own product categories</div><div class="section-card" style="max-width:760px"><div class="field-row"><div class="field"><label>New Category</label><input id="cat-name" placeholder="e.g. Sunscreen"></div><div class="field" style="align-self:end"><button class="btn primary" id="cat-add">➕ Add Category</button></div></div><div id="cat-list">${cats.map(c=>`<div class="list-row" style="display:flex;justify-content:space-between;align-items:center;padding:10px 0;border-bottom:1px solid var(--border)"><b>${escapeHtml(c)}</b><button class="icon-btn" data-cat-del="${escapeHtml(c)}" title="Delete">🗑️</button></div>`).join('')}</div></div>`;
+  document.getElementById('cat-add').onclick=async()=>{ const n=document.getElementById('cat-name').value.trim(); if(!n)return toast('Enter category name','danger'); if(CATEGORY_OPTIONS.some(c=>c.toLowerCase()===n.toLowerCase()))return toast('Category already exists','danger'); CATEGORY_OPTIONS.push(n); STATE.settings.categories=[...CATEGORY_OPTIONS]; await saveSettings(STATE.settings); toast('Category added','ok'); renderCategories(); };
+  viewRoot.querySelectorAll('[data-cat-del]').forEach(b=>b.onclick=async()=>{ const c=b.dataset.catDel; if(STATE.products.some(p=>p.category===c)) return toast('Category is used by products. Move those products first.','danger'); if(CATEGORY_OPTIONS.length<=1)return toast('Keep at least one category','danger'); CATEGORY_OPTIONS=CATEGORY_OPTIONS.filter(x=>x!==c); STATE.settings.categories=[...CATEGORY_OPTIONS]; await saveSettings(STATE.settings); renderCategories(); });
 }
-async function verifyAuth(username,password){
-  const auth=await getAuth();
-  if(!auth || !auth.value) return false;
-  if(username.trim().toLowerCase()!==String(auth.value.username||'admin').toLowerCase()) return false;
-  const hash=await hashPassword(password,unb64(auth.value.salt));
-  return timingSafeEqual(hash,unb64(auth.value.hash));
-}
-function showLoginError(msg){ const el=document.getElementById('login-error'); if(el) el.textContent=msg; }
-function renderLogin(){
-  const root=document.getElementById('login-content');
-  const auth=window.__AUTH_CACHE;
-  if(!auth){
-    root.innerHTML=`<h2 class="login-title">Create your admin login</h2><p class="login-sub">First run only. Choose a strong password; it is stored locally as a cryptographic hash.</p><div class="field"><label>Username</label><input id="setup-user" value="admin" autocomplete="username"></div><div class="field"><label>Password</label><div class="password-wrap"><input id="setup-pass" type="password" autocomplete="new-password"><button class="password-toggle" type="button" data-toggle="setup-pass">Show</button></div></div><div class="field"><label>Confirm Password</label><div class="password-wrap"><input id="setup-pass2" type="password" autocomplete="new-password"><button class="password-toggle" type="button" data-toggle="setup-pass2">Show</button></div></div><div class="login-error" id="login-error"></div><button class="btn primary" id="setup-btn">Create Secure Login</button>`;
-    document.getElementById('setup-btn').onclick=async()=>{
-      const u=document.getElementById('setup-user').value.trim()||'admin', p=document.getElementById('setup-pass').value, p2=document.getElementById('setup-pass2').value;
-      if(p.length<8){showLoginError('Password must be at least 8 characters.');return;}
-      if(p!==p2){showLoginError('Passwords do not match.');return;}
-      if(!/[A-Za-z]/.test(p)||!/[0-9]/.test(p)){showLoginError('Use at least one letter and one number.');return;}
-      await createAuth(u,p); window.__AUTH_CACHE=await getAuth(); await unlockApp(u); toast('Secure login created','ok');
-    };
-  }else{
-    root.innerHTML=`<h2 class="login-title">Welcome back</h2><p class="login-sub">Sign in to open your shop inventory.</p><div class="field"><label>Username</label><input id="login-user" value="${escapeHtml(auth.value.username||'admin')}" autocomplete="username"></div><div class="field"><label>Password</label><div class="password-wrap"><input id="login-pass" type="password" autocomplete="current-password"><button class="password-toggle" type="button" data-toggle="login-pass">Show</button></div></div><div class="login-error" id="login-error"></div><button class="btn primary" id="login-btn">🔐 Sign In</button>`;
-    document.getElementById('login-btn').onclick=doLogin;
-    document.getElementById('login-pass').addEventListener('keydown',e=>{if(e.key==='Enter')doLogin();});
+
+/* Add stock movement automatically whenever a product record changes. */
+const _idbPutOriginal = idbPut;
+idbPut = async function(store,value){
+  if(store==='products' && db){
+    try{
+      const old=await idbGet('products',value.id);
+      const before=old?Number(old.stock||0):0, after=Number(value.stock||0);
+      const delta=after-before;
+      const result=await _idbPutOriginal(store,value);
+      if(delta!==0 && old){
+        const move={id:uid('move'),date:new Date().toISOString(),productId:value.id,productName:value.name,barcode:value.barcode||'',type:delta>0?'IN':'OUT',qty:Math.abs(delta),before,after,reason:value._stockReason||'Stock adjustment'};
+        await _idbPutOriginal('stockMoves',move); STATE.stockMoves=STATE.stockMoves||[]; STATE.stockMoves.push(move);
+      }
+      return result;
+    }catch(e){ return _idbPutOriginal(store,value); }
   }
-  root.querySelectorAll('[data-toggle]').forEach(b=>b.addEventListener('click',()=>{const i=document.getElementById(b.dataset.toggle);i.type=i.type==='password'?'text':'password';b.textContent=i.type==='password'?'Show':'Hide';}));
+  return _idbPutOriginal(store,value);
+};
+
+/* Enhanced product print/download controls. */
+function renderProducts(){
+  const rows=filteredProducts();
+  viewRoot.innerHTML=`<h1 class="page-title">📦 Products & Inventory</h1><div class="page-sub">${STATE.products.length} products · ${rows.length} shown</div><div class="section-card"><div class="section-head"><h2>Inventory</h2><div class="btn-row"><button class="btn primary" id="p-fast">➕ Fast Add</button><button class="btn" id="p-print">🖨️ Print</button><button class="btn" id="p-csv">⬇️ Download CSV</button></div></div><div class="filter-row"><input id="p-search" class="filter-input" placeholder="Search name, brand, barcode, category..." value="${escapeHtml(productSearch||'')}"><button class="filter-btn ${productStatusFilter==='all'?'active':''}" data-status-filter="all">All</button><button class="filter-btn ${productStatusFilter==='ok'?'active':''}" data-status-filter="ok">In Stock</button><button class="filter-btn ${productStatusFilter==='low'?'active':''}" data-status-filter="low">Low</button><button class="filter-btn ${productStatusFilter==='out'?'active':''}" data-status-filter="out">Out</button><select class="filter-select" id="category-filter"><option value="">All Categories</option>${CATEGORY_OPTIONS.map(c=>`<option value="${escapeHtml(c)}" ${productCategoryFilter===c?'selected':''}>${escapeHtml(c)}</option>`).join('')}</select></div><table><thead><tr><th>Product</th><th>Brand</th><th>Category</th><th>Barcode</th><th>Stock</th><th>Buy</th><th>Sell</th><th>Status</th><th>Actions</th></tr></thead><tbody>${rows.length?rows.map(p=>{const st=stockStatus(p);return `<tr><td><b>${escapeHtml(p.name)}</b></td><td>${escapeHtml(p.brand||'-')}</td><td>${escapeHtml(p.category||'-')}</td><td>${escapeHtml(p.barcode||'-')}</td><td><b>${p.stock}</b> ${escapeHtml(p.unit||'')}</td><td>${fmtMoney(p.purchasePrice)}</td><td>${fmtMoney(p.sellingPrice)}</td><td>${st==='out'?'<span class="pill danger">OUT</span>':st==='low'?'<span class="pill warn">LOW</span>':'<span class="pill ok">OK</span>'}</td><td><div class="row-actions"><button class="icon-btn" data-view-id="${p.id}">👁️</button><button class="icon-btn" data-edit-id="${p.id}">✏️</button><button class="icon-btn" data-stock-id="${p.id}">📦</button><button class="icon-btn" data-del-id="${p.id}">🗑️</button></div></td></tr>`}).join(''):`<tr><td colspan="9"><div class="empty-state">No products match your filter.</div></td></tr>`}</tbody></table></div>`;
+  document.getElementById('p-fast').onclick=openFastAdd; document.getElementById('p-print').onclick=()=>printFilteredStock(rows); document.getElementById('p-csv').onclick=()=>downloadStockCSV(rows); document.getElementById('p-search').oninput=e=>{productSearch=e.target.value;renderProducts();}; document.getElementById('category-filter').onchange=e=>{productCategoryFilter=e.target.value;renderProducts();}; viewRoot.querySelectorAll('[data-status-filter]').forEach(b=>b.onclick=()=>{productStatusFilter=b.dataset.statusFilter;renderProducts();}); viewRoot.querySelectorAll('[data-view-id]').forEach(b=>b.onclick=()=>openViewProduct(b.dataset.viewId)); viewRoot.querySelectorAll('[data-edit-id]').forEach(b=>b.onclick=()=>openEditProduct(b.dataset.editId)); viewRoot.querySelectorAll('[data-stock-id]').forEach(b=>b.onclick=()=>openStockAdjust(b.dataset.stockId)); viewRoot.querySelectorAll('[data-del-id]').forEach(b=>b.onclick=()=>confirmDeleteProduct(b.dataset.delId));
 }
-async function doLogin(){
-  const u=document.getElementById('login-user').value, p=document.getElementById('login-pass').value;
-  const ok=await verifyAuth(u,p);
-  if(!ok){showLoginError('Invalid username or password.');document.getElementById('login-pass').select();return;}
-  await unlockApp(u);
+let productSearch='';
+function filteredProducts(){ const q=(productSearch||'').trim().toLowerCase(); return STATE.products.filter(p=>(!q||[p.name,p.brand,p.barcode,p.category,p.productCode,p.supplier,p.subcategory].some(v=>(v||'').toLowerCase().includes(q)))&& (productStatusFilter==='all'||stockStatus(p)===productStatusFilter) && (!productCategoryFilter||p.category===productCategoryFilter)); }
+
+/* Report downloads/prints for existing report screens. */
+function renderReports(){
+  const monthStr=new Date().toISOString().slice(0,7), monthSales=STATE.sales.filter(s=>s.date.slice(0,7)===monthStr), todaySales=STATE.sales.filter(s=>isSameDay(s.date,todayStr()));
+  const todayTotal=todaySales.reduce((a,s)=>a+s.total,0), monthTotal=monthSales.reduce((a,s)=>a+s.total,0); const inv=STATE.products.reduce((a,p)=>a+p.stock*p.purchasePrice,0); const retail=STATE.products.reduce((a,p)=>a+p.stock*p.sellingPrice,0);
+  const qtyMap={}; STATE.sales.forEach(s=>s.items.forEach(i=>qtyMap[i.name]=(qtyMap[i.name]||0)+i.qty)); const top=Object.entries(qtyMap).sort((a,b)=>b[1]-a[1]);
+  viewRoot.innerHTML=`<h1 class="page-title">📊 Reports</h1><div class="page-sub">Sales, inventory and product performance</div><div class="cards-row" style="grid-template-columns:repeat(4,1fr)"><div class="stat-card ok"><div class="label">Today</div><div class="value">${fmtMoney(todayTotal)}</div></div><div class="stat-card brand"><div class="label">This Month</div><div class="value">${fmtMoney(monthTotal)}</div></div><div class="stat-card"><div class="label">Cost Stock</div><div class="value">${fmtMoney(inv)}</div></div><div class="stat-card warn"><div class="label">Retail Stock</div><div class="value">${fmtMoney(retail)}</div></div></div><div class="section-card"><div class="section-head"><h2>Sales Report</h2></div><div class="btn-row"><button class="btn" id="r-print">🖨️ Print Full Report</button><button class="btn" id="r-csv">⬇️ Download Sales CSV</button></div></div><div class="section-card"><div class="section-head"><h2>Top Selling Products</h2></div>${top.length?`<table><thead><tr><th>Product</th><th>Units Sold</th></tr></thead><tbody>${top.map(([n,q])=>`<tr><td>${escapeHtml(n)}</td><td>${q}</td></tr>`).join('')}</tbody></table>`:'<div class="empty-state">No sales data yet.</div>'}</div>`;
+  document.getElementById('r-print').onclick=()=>printFullBusinessReport(todaySales,monthSales,top); document.getElementById('r-csv').onclick=()=>downloadCSV(`sales-report-${todayStr()}.csv`,['Invoice','Date','Payment','Items','Total'],STATE.sales.map(s=>[s.invoiceNo,s.date,s.paymentMethod,s.items.length,s.total]));
 }
-async function unlockApp(username){
-  sessionStorage.setItem('vikaasofttech_unlocked','1');
-  lastActivity=Date.now();
-  document.getElementById('login-screen').style.display='none';
-  document.getElementById('app').style.display='flex';
-  document.getElementById('app-user').textContent=username||'Admin';
-  await loadAll();
+function printFullBusinessReport(todaySales,monthSales,top){ printHtml(`<h2 style="text-align:center">${escapeHtml(STATE.settings.shopName||'Vikaasofttech Cosmetics')}</h2><p style="text-align:center">Business Report — ${new Date().toLocaleDateString('en-IN')}</p><h3>Sales</h3><p>Today: ${fmtMoney(todaySales.reduce((a,s)=>a+s.total,0))} &nbsp; | &nbsp; Month: ${fmtMoney(monthSales.reduce((a,s)=>a+s.total,0))}</p><h3>Inventory</h3><p>Products: ${STATE.products.length} &nbsp; | &nbsp; Units: ${STATE.products.reduce((a,p)=>a+p.stock,0)} &nbsp; | &nbsp; Cost: ${fmtMoney(STATE.products.reduce((a,p)=>a+p.stock*p.purchasePrice,0))}</p><h3>Top Products</h3><table><thead><tr><th>Product</th><th>Units</th></tr></thead><tbody>${top.map(([n,q])=>`<tr><td>${escapeHtml(n)}</td><td>${q}</td></tr>`).join('')}</tbody></table>`); }
+
+function renderExpiry(){
+  const list=STATE.products.filter(p=>p.expiryDate).sort((a,b)=>a.expiryDate.localeCompare(b.expiryDate));
+  viewRoot.innerHTML=`<h1 class="page-title">⏰ Expiry Tracking</h1><div class="page-sub">${list.length} products with expiry dates</div><div class="section-card"><div class="btn-row" style="justify-content:flex-end"><button class="btn" id="ex-print">🖨️ Print</button><button class="btn" id="ex-csv">⬇️ Download CSV</button></div>${list.length?`<table><thead><tr><th>Product</th><th>Batch</th><th>Expiry</th><th>Stock</th><th>Status</th></tr></thead><tbody>${list.map(p=>{const days=Math.floor((new Date(p.expiryDate)-new Date(todayStr()))/86400000);const st=days<0?'Expired':days<=30?'Expiring Soon':'OK';return `<tr><td>${escapeHtml(p.name)}</td><td>${escapeHtml(p.batchNumber||'-')}</td><td>${p.expiryDate}</td><td>${p.stock}</td><td>${st==='Expired'?'<span class="pill danger">Expired</span>':st==='Expiring Soon'?'<span class="pill warn">Soon</span>':'<span class="pill ok">OK</span>'}</td></tr>`}).join('')}</tbody></table>`:'<div class="empty-state">No expiry dates recorded.</div>'}</div>`;
+  document.getElementById('ex-print').onclick=()=>printExpiry(list); document.getElementById('ex-csv').onclick=()=>downloadCSV(`expiry-report-${todayStr()}.csv`,['Product','Batch','Expiry','Stock','Status'],list.map(p=>{const d=Math.floor((new Date(p.expiryDate)-new Date(todayStr()))/86400000);return[p.name,p.batchNumber||'',p.expiryDate,p.stock,d<0?'Expired':d<=30?'Expiring Soon':'OK']}));
 }
-function lockApp(){
-  sessionStorage.removeItem('vikaasofttech_unlocked');
-  document.getElementById('app').style.display='none';
-  document.getElementById('login-screen').style.display='flex';
-  renderLogin();
+function printExpiry(list){ printHtml(`<h2 style="text-align:center">${escapeHtml(STATE.settings.shopName||'Vikaasofttech Cosmetics')}</h2><p style="text-align:center">Expiry Report</p><table><thead><tr><th>Product</th><th>Batch</th><th>Expiry</th><th>Stock</th><th>Status</th></tr></thead><tbody>${list.map(p=>`<tr><td>${escapeHtml(p.name)}</td><td>${escapeHtml(p.batchNumber||'-')}</td><td>${p.expiryDate}</td><td>${p.stock}</td><td>${new Date(p.expiryDate)<new Date(todayStr())?'Expired': 'Active'}</td></tr>`).join('')}</tbody></table>`); }
+
+function renderSalesHistory(){
+  const sales=[...STATE.sales].sort((a,b)=>b.date.localeCompare(a.date));
+  viewRoot.innerHTML=`<h1 class="page-title">🧾 Sales History</h1><div class="page-sub">${sales.length} invoice(s)</div><div class="section-card"><div class="btn-row" style="justify-content:flex-end"><button class="btn" id="sh-print">🖨️ Print</button><button class="btn" id="sh-csv">⬇️ Download CSV</button></div>${sales.length?`<table><thead><tr><th>Invoice</th><th>Date</th><th>Items</th><th>Payment</th><th>Total</th><th>Actions</th></tr></thead><tbody>${sales.map(s=>`<tr><td>#${s.invoiceNo}</td><td>${new Date(s.date).toLocaleString('en-IN')}</td><td>${s.items.length}</td><td>${s.paymentMethod}</td><td>${fmtMoney(s.total)}</td><td><button class="icon-btn" data-sale-id="${s.id}">🖨️</button></td></tr>`).join('')}</tbody></table>`:'<div class="empty-state">No sales recorded.</div>'}</div>`;
+  document.getElementById('sh-print').onclick=()=>printSalesHistory(sales); document.getElementById('sh-csv').onclick=()=>downloadCSV(`sales-history-${todayStr()}.csv`,['Invoice','Date','Payment','Items','Total'],sales.map(s=>[s.invoiceNo,s.date,s.paymentMethod,s.items.length,s.total])); viewRoot.querySelectorAll('[data-sale-id]').forEach(b=>b.onclick=()=>showInvoiceModal(STATE.sales.find(s=>s.id===b.dataset.saleId)));
 }
-async function authInit(){
-  window.__AUTH_CACHE=await getAuth();
-  if(sessionStorage.getItem('vikaasofttech_unlocked')==='1' && window.__AUTH_CACHE){
-    document.getElementById('login-screen').style.display='none';
-    document.getElementById('app').style.display='flex';
-    document.getElementById('app-user').textContent=window.__AUTH_CACHE.value.username||'Admin';
-    await loadAll();
-  }else renderLogin();
-}
-['click','keydown','mousemove','touchstart'].forEach(ev=>document.addEventListener(ev,()=>{lastActivity=Date.now();},{passive:true}));
-setInterval(()=>{ if(document.getElementById('app').style.display!=='none' && Date.now()-lastActivity>AUTH_TIMEOUT_MS) lockApp(); },60000);
+function printSalesHistory(sales){ printHtml(`<h2 style="text-align:center">${escapeHtml(STATE.settings.shopName||'Vikaasofttech Cosmetics')}</h2><p style="text-align:center">Sales History</p><table><thead><tr><th>Invoice</th><th>Date</th><th>Payment</th><th>Items</th><th>Total</th></tr></thead><tbody>${sales.map(s=>`<tr><td>#${s.invoiceNo}</td><td>${new Date(s.date).toLocaleString('en-IN')}</td><td>${s.paymentMethod}</td><td>${s.items.length}</td><td>${fmtMoney(s.total)}</td></tr>`).join('')}</tbody></table>`); }
 
 /* ============================================================
-   INIT
+   DIRECT STARTUP — NO PASSWORD / NO LOGIN
    ============================================================ */
 async function loadAll(){
   STATE.products = await idbGetAll('products');
@@ -1706,18 +1720,30 @@ async function loadAll(){
   STATE.customers = await idbGetAll('customers');
   STATE.suppliers = await idbGetAll('suppliers');
   STATE.settings = await getSettings();
+  STATE.stockMoves = await idbGetAll('stockMoves');
+  const savedCats = Array.isArray(STATE.settings.categories) ? STATE.settings.categories : null;
+  if(savedCats && savedCats.length) CATEGORY_OPTIONS = savedCats;
+  else { STATE.settings.categories = [...CATEGORY_OPTIONS]; await saveSettings(STATE.settings); }
   render();
 }
+function lockApp(){
+  // Login has intentionally been removed. Keep this function harmless for old cached handlers.
+  document.getElementById('app').style.display='flex';
+}
 
+/* ============================================================
+   INIT
+   ============================================================ */
 (async function init(){
   try{
     await openDB();
     tickClock();
-    await authInit();
+    document.getElementById('app').style.display='flex';
+    await loadAll();
   }catch(e){
     console.error(e);
-    document.getElementById('login-content').innerHTML='<div class="login-error">Unable to open local database. Please use a current Chrome/Edge browser.</div>';
-    document.getElementById('login-screen').style.display='flex';
+    const root=document.getElementById('view-root');
+    if(root) root.innerHTML='<div class="section-card"><h2>Unable to open local database</h2><p>Please use the latest Chrome or Edge and refresh the app.</p><button class="btn primary" onclick="location.reload()">↻ Refresh App</button></div>';
   }
 })();
 if('serviceWorker' in navigator && location.protocol !== 'file:'){ navigator.serviceWorker.register('./sw.js').catch(()=>{}); }
