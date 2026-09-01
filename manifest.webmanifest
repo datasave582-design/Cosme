@@ -1,0 +1,9 @@
+{
+  "name": "Vikaasofttech Cosmetics Shop Management",
+  "short_name": "Vikaasofttech",
+  "start_url": "./index.html",
+  "display": "standalone",
+  "background_color": "#f3f4f7",
+  "theme_color": "#9c3b62",
+  "description": "Professional cosmetics inventory and optional billing software"
+}
