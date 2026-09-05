@@ -332,9 +332,28 @@
 </head>
 <body>
 
+<div class="login-screen" id="login-screen" style="display:none;">
+  <div class="login-card">
+    <div class="login-brand">
+      <div class="login-mark">V</div>
+      <div>
+        <h1>Vikaasofttech</h1>
+        <p>Cosmetics Shop Management</p>
+      </div>
+    </div>
+    <div class="login-title">Enter Password</div>
+    <div class="login-sub">This app is locked. Enter the password to continue.</div>
+    <div class="field password-wrap">
+      <input id="login-password" type="password" placeholder="Password" autocomplete="current-password">
+      <button type="button" class="password-toggle" id="login-toggle">SHOW</button>
+    </div>
+    <div class="login-error" id="login-error"></div>
+    <button class="btn primary" id="login-submit">🔓 Unlock</button>
+    <div class="login-foot">Default password is <b>123456</b>. You can change it anytime from Settings after logging in.</div>
+  </div>
+</div>
 
-
-<div id="app" style="display:flex;">
+<div id="app" style="display:none;">
   <aside class="sidebar">
     <div class="brand">
       <div class="brand-mark">Vikaasofttech</div>
@@ -376,6 +395,7 @@
       </div>
       <div class="topbar-right">
         <span class="clock" id="clock"></span>
+        <button class="btn" id="lock-app-btn" title="Lock the app">🔒 Lock</button>
         <button class="btn primary" id="fast-add-btn">➕ Fast Add <span style="opacity:.75;font-weight:400;">(Ctrl+N)</span></button>
       </div>
     </div>
@@ -457,6 +477,19 @@ async function getSettings(){
 async function saveSettings(s){
   await idbPut('meta', {key:'settings', value:s});
 }
+async function getAppPassword(){
+  try{
+    const rec = await idbGet('meta','appPassword');
+    if(rec && rec.value) return rec.value;
+  }catch(e){}
+  // First run: set the default password.
+  const def = '123456';
+  await idbPut('meta', {key:'appPassword', value: def});
+  return def;
+}
+async function saveAppPassword(newPass){
+  await idbPut('meta', {key:'appPassword', value: newPass});
+}
 
 /* ============================================================
    APP STATE
@@ -502,6 +535,28 @@ function stockStatus(p){
   if(p.stock <= 0) return 'out';
   if(p.stock <= p.minStock) return 'low';
   return 'ok';
+}
+
+/* Expiry helpers — shared by Products list and Expiry Tracking page. */
+function daysToExpiry(expiryDate){
+  if(!expiryDate) return null;
+  return Math.floor((new Date(expiryDate) - new Date(todayStr()))/86400000);
+}
+function expiryPill(expiryDate){
+  if(!expiryDate) return '<span class="pill" style="opacity:.55;">-</span>';
+  const days = daysToExpiry(expiryDate);
+  if(days < 0) return '<span class="pill danger">Expired</span>';
+  if(days <= 15) return `<span class="pill danger">${days}d left</span>`;
+  if(days <= 30) return `<span class="pill warn">${days}d left</span>`;
+  if(days <= 90) return `<span class="pill warn">${days}d left</span>`;
+  return '<span class="pill ok">OK</span>';
+}
+function expiryStatusLabel(expiryDate){
+  const days = daysToExpiry(expiryDate);
+  if(days === null) return 'No Expiry';
+  if(days < 0) return 'Expired';
+  if(days <= 30) return 'Expiring Soon';
+  return 'OK';
 }
 
 /* ============================================================
@@ -617,65 +672,8 @@ function renderDashboard(){
 /* ============================================================
    PRODUCTS PAGE
    ============================================================ */
-let productsFilter = '';
-
-function renderProducts(){
-  const rows = filteredProducts();
-  viewRoot.innerHTML = `
-    <h1 class="page-title">Products &amp; Stock</h1>
-    <div class="page-sub">${STATE.products.length} products in catalog • Fast stock control</div>
-    <div class="section-card">
-      <div class="section-head">
-        <h2>Inventory</h2>
-        <button class="btn primary" id="p-fastadd">➕ Fast Add</button>
-      </div>
-      <div class="product-toolbar">
-        <button class="filter-btn ${productStatusFilter==='all'?'active':''}" data-status-filter="all">All (${STATE.products.length})</button>
-        <button class="filter-btn ${productStatusFilter==='ok'?'active':''}" data-status-filter="ok">In Stock (${STATE.products.filter(p=>stockStatus(p)==='ok').length})</button>
-        <button class="filter-btn ${productStatusFilter==='low'?'active':''}" data-status-filter="low">Low (${STATE.products.filter(p=>stockStatus(p)==='low').length})</button>
-        <button class="filter-btn ${productStatusFilter==='out'?'active':''}" data-status-filter="out">Out (${STATE.products.filter(p=>stockStatus(p)==='out').length})</button>
-        <select class="filter-select" id="category-filter"><option value="">All Categories</option>${[...new Set(STATE.products.map(p=>p.category).filter(Boolean))].sort().map(c=>`<option value="${escapeHtml(c)}" ${productCategoryFilter===c?'selected':''}>${escapeHtml(c)}</option>`).join('')}</select>
-        <button class="btn" id="p-print">🖨️ Print</button>
-      </div>
-      ${rows.length === 0 ? `<div class="empty-state">No products match the current filter.</div>` : `
-      <table>
-        <thead><tr><th>Product</th><th>Brand</th><th>Category</th><th>Stock</th><th>Sale Price</th><th>Status</th><th>Actions</th></tr></thead>
-        <tbody>
-          ${rows.map(p=>{
-            const st = stockStatus(p);
-            const pill = st==='out' ? '<span class="pill danger">Out of Stock</span>' : st==='low' ? '<span class="pill warn">Low Stock</span>' : '<span class="pill ok">In Stock</span>';
-            return `<tr>
-              <td><b>${escapeHtml(p.name)}</b>${p.barcode?`<div style="font-size:10.5px;color:var(--text-faint);">${escapeHtml(p.barcode)}</div>`:''}</td>
-              <td>${escapeHtml(p.brand||'-')}</td><td>${escapeHtml(p.category||'-')}</td><td><b>${p.stock}</b> ${escapeHtml(p.unit||'')}</td>
-              <td>${fmtMoney(p.sellingPrice)}</td><td>${pill}</td>
-              <td><div class="row-actions"><button class="icon-btn" title="View" data-view-id="${p.id}">👁️</button><button class="icon-btn" title="Edit" data-edit-id="${p.id}">✏️</button><button class="icon-btn" title="Stock" data-stock-id="${p.id}">📦</button><button class="icon-btn" title="Delete" data-del-id="${p.id}">🗑️</button></div></td>
-            </tr>`;
-          }).join('')}
-        </tbody>
-      </table>`}
-    </div>`;
-  document.getElementById('p-fastadd').addEventListener('click', openFastAdd);
-  document.getElementById('p-print').addEventListener('click', ()=>printFilteredStock(rows));
-  document.getElementById('category-filter').addEventListener('change', e=>{ productCategoryFilter=e.target.value; renderProducts(); });
-  viewRoot.querySelectorAll('[data-status-filter]').forEach(b=>b.addEventListener('click',()=>{ productStatusFilter=b.dataset.statusFilter; renderProducts(); }));
-  viewRoot.querySelectorAll('[data-view-id]').forEach(b=>b.addEventListener('click', ()=>openViewProduct(b.dataset.viewId)));
-  viewRoot.querySelectorAll('[data-edit-id]').forEach(b=>b.addEventListener('click', ()=>openEditProduct(b.dataset.editId)));
-  viewRoot.querySelectorAll('[data-stock-id]').forEach(b=>b.addEventListener('click', ()=>openStockAdjust(b.dataset.stockId)));
-  viewRoot.querySelectorAll('[data-del-id]').forEach(b=>b.addEventListener('click', ()=>confirmDeleteProduct(b.dataset.delId)));
-}
-
 let productStatusFilter = 'all';
 let productCategoryFilter = '';
-
-function filteredProducts(){
-  const q = productsFilter.trim().toLowerCase();
-  return STATE.products.filter(p => {
-    const textMatch = !q || [p.name,p.brand,p.barcode,p.category,p.productCode,p.supplier].some(v=>(v||'').toLowerCase().includes(q));
-    const statusMatch = productStatusFilter==='all' || stockStatus(p)===productStatusFilter;
-    const categoryMatch = !productCategoryFilter || p.category===productCategoryFilter;
-    return textMatch && statusMatch && categoryMatch;
-  });
-}
 
 function escapeHtml(str){
   return String(str||'').replace(/[&<>"']/g, m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
@@ -683,7 +681,7 @@ function escapeHtml(str){
 
 /* ---- Global search wires into Products view or POS depending on context ---- */
 document.getElementById('global-search').addEventListener('input', (e)=>{
-  productsFilter = e.target.value;
+  productSearch = e.target.value;
   if(STATE.view !== 'products') setView('products');
   else renderProducts();
 });
@@ -1057,30 +1055,6 @@ function renderStockList(kind){
   viewRoot.querySelectorAll('[data-stock-id]').forEach(b=>b.addEventListener('click', ()=>openStockAdjust(b.dataset.stockId)));
 }
 
-function renderExpiry(){
-  const withExpiry = STATE.products.filter(p=>p.expiryDate).sort((a,b)=>a.expiryDate.localeCompare(b.expiryDate));
-  const now = todayStr();
-  viewRoot.innerHTML = `
-    <h1 class="page-title">⏰ Expiry Tracking</h1>
-    <div class="page-sub">${withExpiry.length} product(s) with expiry dates on record</div>
-    <div class="section-card">
-      ${withExpiry.length===0 ? `<div class="empty-state">No expiry dates recorded. Add them under "More Details" when creating a product.</div>` : `
-      <table>
-        <thead><tr><th>Product</th><th>Batch</th><th>Expiry Date</th><th>Status</th></tr></thead>
-        <tbody>
-          ${withExpiry.map(p=>{
-            const days = Math.floor((new Date(p.expiryDate) - new Date(now))/86400000);
-            let pill = '<span class="pill ok">OK</span>';
-            if(days < 0) pill = '<span class="pill danger">Expired</span>';
-            else if(days <= 30) pill = '<span class="pill warn">Expiring Soon</span>';
-            return `<tr><td>${escapeHtml(p.name)}</td><td>${escapeHtml(p.batchNumber||'-')}</td><td>${p.expiryDate}</td><td>${pill}</td></tr>`;
-          }).join('')}
-        </tbody>
-      </table>`}
-    </div>
-  `;
-}
-
 /* ============================================================
    NEW SALE (POS)
    ============================================================ */
@@ -1338,38 +1312,6 @@ function printFilteredStock(list){
 }
 
 /* ============================================================
-   SALES HISTORY
-   ============================================================ */
-function renderSalesHistory(){
-  const sales = [...STATE.sales].sort((a,b)=>b.date.localeCompare(a.date));
-  viewRoot.innerHTML = `
-    <h1 class="page-title">🧾 Sales History</h1>
-    <div class="page-sub">${sales.length} invoice(s) recorded</div>
-    <div class="section-card">
-      ${sales.length===0 ? `<div class="empty-state">No sales recorded yet.</div>` : `
-      <table>
-        <thead><tr><th>Invoice</th><th>Date</th><th>Items</th><th>Payment</th><th style="text-align:right;">Total</th><th>Actions</th></tr></thead>
-        <tbody>
-          ${sales.map(s=>`
-            <tr>
-              <td>#${s.invoiceNo}</td>
-              <td>${new Date(s.date).toLocaleString('en-IN',{day:'2-digit',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'})}</td>
-              <td>${s.items.length}</td>
-              <td>${s.paymentMethod}</td>
-              <td style="text-align:right; font-weight:600;">${fmtMoney(s.total)}</td>
-              <td><button class="icon-btn" title="View / Print" data-sale-id="${s.id}">🖨️</button></td>
-            </tr>`).join('')}
-        </tbody>
-      </table>`}
-    </div>
-  `;
-  viewRoot.querySelectorAll('[data-sale-id]').forEach(b=>b.addEventListener('click', ()=>{
-    const sale = STATE.sales.find(s=>s.id===b.dataset.saleId);
-    showInvoiceModal(sale);
-  }));
-}
-
-/* ============================================================
    CUSTOMERS / SUPPLIERS (simple lists)
    ============================================================ */
 function renderCustomers(){
@@ -1432,44 +1374,6 @@ function wirePeopleView(kind){
     STATE[store] = STATE[store].filter(x=>x.id!==b.dataset.del);
     render();
   }));
-}
-
-/* ============================================================
-   REPORTS
-   ============================================================ */
-function renderReports(){
-  const now = new Date();
-  const monthStr = now.toISOString().slice(0,7);
-  const monthSales = STATE.sales.filter(s=>s.date.slice(0,7)===monthStr);
-  const monthTotal = monthSales.reduce((a,s)=>a+s.total,0);
-  const todaySales = STATE.sales.filter(s=>isSameDay(s.date, todayStr()));
-  const todayTotal = todaySales.reduce((a,s)=>a+s.total,0);
-
-  // top products by qty sold
-  const qtyMap = {};
-  STATE.sales.forEach(s=>s.items.forEach(i=>{ qtyMap[i.name] = (qtyMap[i.name]||0) + i.qty; }));
-  const topProducts = Object.entries(qtyMap).sort((a,b)=>b[1]-a[1]).slice(0,8);
-
-  const inventoryValue = STATE.products.reduce((a,p)=>a+(p.stock*p.purchasePrice),0);
-
-  viewRoot.innerHTML = `
-    <h1 class="page-title">📊 Reports</h1>
-    <div class="page-sub">Business overview</div>
-    <div class="cards-row" style="grid-template-columns:repeat(4,1fr);">
-      <div class="stat-card ok"><div class="label">Today's Sales</div><div class="value">${fmtMoney(todayTotal)}</div></div>
-      <div class="stat-card brand"><div class="label">This Month</div><div class="value">${fmtMoney(monthTotal)}</div></div>
-      <div class="stat-card"><div class="label">Total Invoices</div><div class="value">${STATE.sales.length}</div></div>
-      <div class="stat-card"><div class="label">Inventory Value (cost)</div><div class="value">${fmtMoney(inventoryValue)}</div></div>
-    </div>
-    <div class="section-card">
-      <div class="section-head"><h2>Top Selling Products</h2></div>
-      ${topProducts.length===0 ? `<div class="empty-state">No sales data yet.</div>` : `
-      <table>
-        <thead><tr><th>Product</th><th>Units Sold</th></tr></thead>
-        <tbody>${topProducts.map(([name,qty])=>`<tr><td>${escapeHtml(name)}</td><td>${qty}</td></tr>`).join('')}</tbody>
-      </table>`}
-    </div>
-  `;
 }
 
 /* ============================================================
@@ -1541,8 +1445,15 @@ function renderSettings(){
       <div class="btn-row"><button class="btn primary" id="set-save">Save Settings</button></div>
     </div>
     <div class="section-card security-card" style="max-width:640px;">
-      <div class="section-head"><h2>⚡ Quick Access</h2></div>
-      <p class="security-note">Password login is disabled. The software opens directly for fast shop use.</p>
+      <div class="section-head"><h2>🔒 App Password</h2></div>
+      <p class="security-note">The app asks for this password every time it is opened or unlocked. Change it here anytime.</p>
+      <div class="field password-wrap"><label>Current Password</label><input id="pw-current" type="password" autocomplete="current-password"><button type="button" class="password-toggle" data-pw-toggle="pw-current" style="top:26px;">SHOW</button></div>
+      <div class="field-row">
+        <div class="field password-wrap"><label>New Password</label><input id="pw-new" type="password" autocomplete="new-password"><button type="button" class="password-toggle" data-pw-toggle="pw-new" style="top:26px;">SHOW</button></div>
+        <div class="field password-wrap"><label>Confirm New Password</label><input id="pw-confirm" type="password" autocomplete="new-password"><button type="button" class="password-toggle" data-pw-toggle="pw-confirm" style="top:26px;">SHOW</button></div>
+      </div>
+      <div class="login-error" id="pw-error"></div>
+      <div class="btn-row"><button class="btn primary" id="pw-save">Change Password</button></div>
     </div>`;
   document.getElementById('set-save').addEventListener('click',async()=>{
     STATE.settings.shopName=document.getElementById('set-shopname').value.trim();
@@ -1552,6 +1463,29 @@ function renderSettings(){
     await saveSettings(STATE.settings);
     toast('Settings saved','ok');
     render();
+  });
+  viewRoot.querySelectorAll('[data-pw-toggle]').forEach(btn=>{
+    btn.addEventListener('click',()=>{
+      const inp=document.getElementById(btn.dataset.pwToggle);
+      if(inp.type==='password'){ inp.type='text'; btn.textContent='HIDE'; }
+      else { inp.type='password'; btn.textContent='SHOW'; }
+    });
+  });
+  document.getElementById('pw-save').addEventListener('click', async ()=>{
+    const errBox=document.getElementById('pw-error');
+    errBox.textContent='';
+    const current=document.getElementById('pw-current').value;
+    const next=document.getElementById('pw-new').value;
+    const confirm=document.getElementById('pw-confirm').value;
+    const actual=await getAppPassword();
+    if(current!==actual){ errBox.textContent='Current password is incorrect.'; return; }
+    if(!next || next.length<4){ errBox.textContent='New password must be at least 4 characters.'; return; }
+    if(next!==confirm){ errBox.textContent='New password and confirmation do not match.'; return; }
+    await saveAppPassword(next);
+    document.getElementById('pw-current').value='';
+    document.getElementById('pw-new').value='';
+    document.getElementById('pw-confirm').value='';
+    toast('Password changed successfully','ok');
   });
 }
 
@@ -1594,6 +1528,7 @@ document.addEventListener('keydown', (e)=>{
 });
 
 document.getElementById('fast-add-btn').addEventListener('click', openFastAdd);
+document.getElementById('lock-app-btn').addEventListener('click', lockApp);
 
 /* ============================================================
    CLOCK
@@ -1681,7 +1616,7 @@ idbPut = async function(store,value){
 /* Enhanced product print/download controls. */
 function renderProducts(){
   const rows=filteredProducts();
-  viewRoot.innerHTML=`<h1 class="page-title">📦 Products & Inventory</h1><div class="page-sub">${STATE.products.length} products · ${rows.length} shown</div><div class="section-card"><div class="section-head"><h2>Inventory</h2><div class="btn-row"><button class="btn primary" id="p-fast">➕ Fast Add</button><button class="btn" id="p-print">🖨️ Print</button><button class="btn" id="p-csv">⬇️ Download CSV</button></div></div><div class="filter-row"><input id="p-search" class="filter-input" placeholder="Search name, brand, barcode, category..." value="${escapeHtml(productSearch||'')}"><button class="filter-btn ${productStatusFilter==='all'?'active':''}" data-status-filter="all">All</button><button class="filter-btn ${productStatusFilter==='ok'?'active':''}" data-status-filter="ok">In Stock</button><button class="filter-btn ${productStatusFilter==='low'?'active':''}" data-status-filter="low">Low</button><button class="filter-btn ${productStatusFilter==='out'?'active':''}" data-status-filter="out">Out</button><select class="filter-select" id="category-filter"><option value="">All Categories</option>${CATEGORY_OPTIONS.map(c=>`<option value="${escapeHtml(c)}" ${productCategoryFilter===c?'selected':''}>${escapeHtml(c)}</option>`).join('')}</select></div><table><thead><tr><th>Product</th><th>Brand</th><th>Category</th><th>Barcode</th><th>Stock</th><th>Buy</th><th>Sell</th><th>Status</th><th>Actions</th></tr></thead><tbody>${rows.length?rows.map(p=>{const st=stockStatus(p);return `<tr><td><b>${escapeHtml(p.name)}</b></td><td>${escapeHtml(p.brand||'-')}</td><td>${escapeHtml(p.category||'-')}</td><td>${escapeHtml(p.barcode||'-')}</td><td><b>${p.stock}</b> ${escapeHtml(p.unit||'')}</td><td>${fmtMoney(p.purchasePrice)}</td><td>${fmtMoney(p.sellingPrice)}</td><td>${st==='out'?'<span class="pill danger">OUT</span>':st==='low'?'<span class="pill warn">LOW</span>':'<span class="pill ok">OK</span>'}</td><td><div class="row-actions"><button class="icon-btn" data-view-id="${p.id}">👁️</button><button class="icon-btn" data-edit-id="${p.id}">✏️</button><button class="icon-btn" data-stock-id="${p.id}">📦</button><button class="icon-btn" data-del-id="${p.id}">🗑️</button></div></td></tr>`}).join(''):`<tr><td colspan="9"><div class="empty-state">No products match your filter.</div></td></tr>`}</tbody></table></div>`;
+  viewRoot.innerHTML=`<h1 class="page-title">📦 Products & Inventory</h1><div class="page-sub">${STATE.products.length} products · ${rows.length} shown</div><div class="section-card"><div class="section-head"><h2>Inventory</h2><div class="btn-row"><button class="btn primary" id="p-fast">➕ Fast Add</button><button class="btn" id="p-print">🖨️ Print</button><button class="btn" id="p-csv">⬇️ Download CSV</button></div></div><div class="filter-row"><input id="p-search" class="filter-input" placeholder="Search name, brand, barcode, category..." value="${escapeHtml(productSearch||'')}"><button class="filter-btn ${productStatusFilter==='all'?'active':''}" data-status-filter="all">All</button><button class="filter-btn ${productStatusFilter==='ok'?'active':''}" data-status-filter="ok">In Stock</button><button class="filter-btn ${productStatusFilter==='low'?'active':''}" data-status-filter="low">Low</button><button class="filter-btn ${productStatusFilter==='out'?'active':''}" data-status-filter="out">Out</button><select class="filter-select" id="category-filter"><option value="">All Categories</option>${CATEGORY_OPTIONS.map(c=>`<option value="${escapeHtml(c)}" ${productCategoryFilter===c?'selected':''}>${escapeHtml(c)}</option>`).join('')}</select></div><table><thead><tr><th>Product</th><th>Brand</th><th>Category</th><th>Barcode</th><th>Stock</th><th>Buy</th><th>Sell</th><th>Status</th><th>Expiry</th><th>Actions</th></tr></thead><tbody>${rows.length?rows.map(p=>{const st=stockStatus(p);return `<tr><td><b>${escapeHtml(p.name)}</b></td><td>${escapeHtml(p.brand||'-')}</td><td>${escapeHtml(p.category||'-')}</td><td>${escapeHtml(p.barcode||'-')}</td><td><b>${p.stock}</b> ${escapeHtml(p.unit||'')}</td><td>${fmtMoney(p.purchasePrice)}</td><td>${fmtMoney(p.sellingPrice)}</td><td>${st==='out'?'<span class="pill danger">OUT</span>':st==='low'?'<span class="pill warn">LOW</span>':'<span class="pill ok">OK</span>'}</td><td>${p.expiryDate?`${p.expiryDate}<br>${expiryPill(p.expiryDate)}`:expiryPill(null)}</td><td><div class="row-actions"><button class="icon-btn" data-view-id="${p.id}">👁️</button><button class="icon-btn" data-edit-id="${p.id}">✏️</button><button class="icon-btn" data-stock-id="${p.id}">📦</button><button class="icon-btn" data-del-id="${p.id}">🗑️</button></div></td></tr>`}).join(''):`<tr><td colspan="10"><div class="empty-state">No products match your filter.</div></td></tr>`}</tbody></table></div>`;
   document.getElementById('p-fast').onclick=openFastAdd; document.getElementById('p-print').onclick=()=>printFilteredStock(rows); document.getElementById('p-csv').onclick=()=>downloadStockCSV(rows); document.getElementById('p-search').oninput=e=>{productSearch=e.target.value;renderProducts();}; document.getElementById('category-filter').onchange=e=>{productCategoryFilter=e.target.value;renderProducts();}; viewRoot.querySelectorAll('[data-status-filter]').forEach(b=>b.onclick=()=>{productStatusFilter=b.dataset.statusFilter;renderProducts();}); viewRoot.querySelectorAll('[data-view-id]').forEach(b=>b.onclick=()=>openViewProduct(b.dataset.viewId)); viewRoot.querySelectorAll('[data-edit-id]').forEach(b=>b.onclick=()=>openEditProduct(b.dataset.editId)); viewRoot.querySelectorAll('[data-stock-id]').forEach(b=>b.onclick=()=>openStockAdjust(b.dataset.stockId)); viewRoot.querySelectorAll('[data-del-id]').forEach(b=>b.onclick=()=>confirmDeleteProduct(b.dataset.delId));
 }
 let productSearch='';
@@ -1697,12 +1632,46 @@ function renderReports(){
 }
 function printFullBusinessReport(todaySales,monthSales,top){ printHtml(`<h2 style="text-align:center">${escapeHtml(STATE.settings.shopName||'Vikaasofttech Cosmetics')}</h2><p style="text-align:center">Business Report — ${new Date().toLocaleDateString('en-IN')}</p><h3>Sales</h3><p>Today: ${fmtMoney(todaySales.reduce((a,s)=>a+s.total,0))} &nbsp; | &nbsp; Month: ${fmtMoney(monthSales.reduce((a,s)=>a+s.total,0))}</p><h3>Inventory</h3><p>Products: ${STATE.products.length} &nbsp; | &nbsp; Units: ${STATE.products.reduce((a,p)=>a+p.stock,0)} &nbsp; | &nbsp; Cost: ${fmtMoney(STATE.products.reduce((a,p)=>a+p.stock*p.purchasePrice,0))}</p><h3>Top Products</h3><table><thead><tr><th>Product</th><th>Units</th></tr></thead><tbody>${top.map(([n,q])=>`<tr><td>${escapeHtml(n)}</td><td>${q}</td></tr>`).join('')}</tbody></table>`); }
 
-function renderExpiry(){
-  const list=STATE.products.filter(p=>p.expiryDate).sort((a,b)=>a.expiryDate.localeCompare(b.expiryDate));
-  viewRoot.innerHTML=`<h1 class="page-title">⏰ Expiry Tracking</h1><div class="page-sub">${list.length} products with expiry dates</div><div class="section-card"><div class="btn-row" style="justify-content:flex-end"><button class="btn" id="ex-print">🖨️ Print</button><button class="btn" id="ex-csv">⬇️ Download CSV</button></div>${list.length?`<table><thead><tr><th>Product</th><th>Batch</th><th>Expiry</th><th>Stock</th><th>Status</th></tr></thead><tbody>${list.map(p=>{const days=Math.floor((new Date(p.expiryDate)-new Date(todayStr()))/86400000);const st=days<0?'Expired':days<=30?'Expiring Soon':'OK';return `<tr><td>${escapeHtml(p.name)}</td><td>${escapeHtml(p.batchNumber||'-')}</td><td>${p.expiryDate}</td><td>${p.stock}</td><td>${st==='Expired'?'<span class="pill danger">Expired</span>':st==='Expiring Soon'?'<span class="pill warn">Soon</span>':'<span class="pill ok">OK</span>'}</td></tr>`}).join('')}</tbody></table>`:'<div class="empty-state">No expiry dates recorded.</div>'}</div>`;
-  document.getElementById('ex-print').onclick=()=>printExpiry(list); document.getElementById('ex-csv').onclick=()=>downloadCSV(`expiry-report-${todayStr()}.csv`,['Product','Batch','Expiry','Stock','Status'],list.map(p=>{const d=Math.floor((new Date(p.expiryDate)-new Date(todayStr()))/86400000);return[p.name,p.batchNumber||'',p.expiryDate,p.stock,d<0?'Expired':d<=30?'Expiring Soon':'OK']}));
+let expiryRangeFilter='all'; // all | expired | 7 | 15 | 30 | 60 | 90
+const EXPIRY_RANGES=[
+  {key:'all',label:'All'},
+  {key:'expired',label:'Expired'},
+  {key:'7',label:'Next 7 Days'},
+  {key:'15',label:'Next 15 Days'},
+  {key:'30',label:'Next 30 Days'},
+  {key:'60',label:'Next 60 Days'},
+  {key:'90',label:'Next 90 Days'},
+];
+function expiryFilteredList(){
+  const all=STATE.products.filter(p=>p.expiryDate).sort((a,b)=>a.expiryDate.localeCompare(b.expiryDate));
+  if(expiryRangeFilter==='all') return all;
+  if(expiryRangeFilter==='expired') return all.filter(p=>daysToExpiry(p.expiryDate)<0);
+  const n=parseInt(expiryRangeFilter,10);
+  return all.filter(p=>{const d=daysToExpiry(p.expiryDate); return d>=0 && d<=n;});
 }
-function printExpiry(list){ printHtml(`<h2 style="text-align:center">${escapeHtml(STATE.settings.shopName||'Vikaasofttech Cosmetics')}</h2><p style="text-align:center">Expiry Report</p><table><thead><tr><th>Product</th><th>Batch</th><th>Expiry</th><th>Stock</th><th>Status</th></tr></thead><tbody>${list.map(p=>`<tr><td>${escapeHtml(p.name)}</td><td>${escapeHtml(p.batchNumber||'-')}</td><td>${p.expiryDate}</td><td>${p.stock}</td><td>${new Date(p.expiryDate)<new Date(todayStr())?'Expired': 'Active'}</td></tr>`).join('')}</tbody></table>`); }
+function renderExpiry(){
+  const full=STATE.products.filter(p=>p.expiryDate);
+  const list=expiryFilteredList();
+  const expiredCount=full.filter(p=>daysToExpiry(p.expiryDate)<0).length;
+  const soonCount=full.filter(p=>{const d=daysToExpiry(p.expiryDate); return d>=0 && d<=30;}).length;
+  viewRoot.innerHTML=`<h1 class="page-title">⏰ Expiry Tracking</h1><div class="page-sub">${full.length} products with expiry dates recorded</div>
+    <div class="cards-row" style="grid-template-columns:repeat(3,1fr)">
+      <div class="stat-card"><div class="label">Total Tracked</div><div class="value">${full.length}</div></div>
+      <div class="stat-card warn"><div class="label">Expiring in 30 Days</div><div class="value">${soonCount}</div></div>
+      <div class="stat-card danger"><div class="label">Already Expired</div><div class="value">${expiredCount}</div></div>
+    </div>
+    <div class="section-card">
+      <div class="btn-row" style="justify-content:space-between;flex-wrap:wrap;gap:8px;">
+        <div class="btn-row" style="justify-content:flex-start;flex-wrap:wrap;gap:6px;">${EXPIRY_RANGES.map(r=>`<button class="filter-btn ${expiryRangeFilter===r.key?'active':''}" data-range="${r.key}">${r.label}</button>`).join('')}</div>
+        <div class="btn-row" style="justify-content:flex-end;"><button class="btn" id="ex-print">🖨️ Print</button><button class="btn" id="ex-csv">⬇️ Download CSV</button></div>
+      </div>
+      ${list.length?`<table><thead><tr><th>Product</th><th>Batch</th><th>Category</th><th>Expiry</th><th>Days Left</th><th>Stock</th><th>Status</th></tr></thead><tbody>${list.map(p=>{const days=daysToExpiry(p.expiryDate);return `<tr><td>${escapeHtml(p.name)}</td><td>${escapeHtml(p.batchNumber||'-')}</td><td>${escapeHtml(p.category||'-')}</td><td>${p.expiryDate}</td><td>${days<0?'Expired':days+' day(s)'}</td><td>${p.stock}</td><td>${expiryPill(p.expiryDate)}</td></tr>`}).join('')}</tbody></table>`:'<div class="empty-state">No products in this range.</div>'}
+    </div>`;
+  document.getElementById('ex-print').onclick=()=>printExpiry(list);
+  document.getElementById('ex-csv').onclick=()=>downloadCSV(`expiry-report-${todayStr()}.csv`,['Product','Batch','Category','Expiry','Days Left','Stock','Status'],list.map(p=>{const d=daysToExpiry(p.expiryDate);return[p.name,p.batchNumber||'',p.category||'',p.expiryDate,d<0?'Expired':d,p.stock,expiryStatusLabel(p.expiryDate)]}));
+  viewRoot.querySelectorAll('[data-range]').forEach(b=>b.onclick=()=>{expiryRangeFilter=b.dataset.range;renderExpiry();});
+}
+function printExpiry(list){ printHtml(`<h2 style="text-align:center">${escapeHtml(STATE.settings.shopName||'Vikaasofttech Cosmetics')}</h2><p style="text-align:center">Expiry Report</p><table><thead><tr><th>Product</th><th>Batch</th><th>Expiry</th><th>Days Left</th><th>Stock</th><th>Status</th></tr></thead><tbody>${list.map(p=>{const d=daysToExpiry(p.expiryDate);return `<tr><td>${escapeHtml(p.name)}</td><td>${escapeHtml(p.batchNumber||'-')}</td><td>${p.expiryDate}</td><td>${d<0?'Expired':d}</td><td>${p.stock}</td><td>${expiryStatusLabel(p.expiryDate)}</td></tr>`}).join('')}</tbody></table>`); }
 
 function renderSalesHistory(){
   const sales=[...STATE.sales].sort((a,b)=>b.date.localeCompare(a.date));
@@ -1712,7 +1681,7 @@ function renderSalesHistory(){
 function printSalesHistory(sales){ printHtml(`<h2 style="text-align:center">${escapeHtml(STATE.settings.shopName||'Vikaasofttech Cosmetics')}</h2><p style="text-align:center">Sales History</p><table><thead><tr><th>Invoice</th><th>Date</th><th>Payment</th><th>Items</th><th>Total</th></tr></thead><tbody>${sales.map(s=>`<tr><td>#${s.invoiceNo}</td><td>${new Date(s.date).toLocaleString('en-IN')}</td><td>${s.paymentMethod}</td><td>${s.items.length}</td><td>${fmtMoney(s.total)}</td></tr>`).join('')}</tbody></table>`); }
 
 /* ============================================================
-   DIRECT STARTUP — NO PASSWORD / NO LOGIN
+   STARTUP — PASSWORD LOGIN
    ============================================================ */
 async function loadAll(){
   STATE.products = await idbGetAll('products');
@@ -1726,9 +1695,46 @@ async function loadAll(){
   else { STATE.settings.categories = [...CATEGORY_OPTIONS]; await saveSettings(STATE.settings); }
   render();
 }
-function lockApp(){
-  // Login has intentionally been removed. Keep this function harmless for old cached handlers.
+
+function showApp(){
+  document.getElementById('login-screen').style.display='none';
   document.getElementById('app').style.display='flex';
+}
+
+function showLoginScreen(){
+  document.getElementById('app').style.display='none';
+  const screen = document.getElementById('login-screen');
+  screen.style.display='flex';
+  const pwInput = document.getElementById('login-password');
+  const errBox = document.getElementById('login-error');
+  const toggleBtn = document.getElementById('login-toggle');
+  pwInput.value=''; errBox.textContent=''; pwInput.focus();
+
+  toggleBtn.onclick = ()=>{
+    if(pwInput.type==='password'){ pwInput.type='text'; toggleBtn.textContent='HIDE'; }
+    else { pwInput.type='password'; toggleBtn.textContent='SHOW'; }
+  };
+
+  const attemptLogin = async ()=>{
+    const entered = pwInput.value;
+    const actual = await getAppPassword();
+    if(entered === actual){
+      sessionStorage.setItem('vst_unlocked','1');
+      showApp();
+      await loadAll();
+    } else {
+      errBox.textContent = 'Incorrect password. Please try again.';
+      pwInput.value=''; pwInput.focus();
+    }
+  };
+
+  document.getElementById('login-submit').onclick = attemptLogin;
+  pwInput.onkeydown = (e)=>{ if(e.key==='Enter') attemptLogin(); };
+}
+
+function lockApp(){
+  sessionStorage.removeItem('vst_unlocked');
+  showLoginScreen();
 }
 
 /* ============================================================
@@ -1738,10 +1744,16 @@ function lockApp(){
   try{
     await openDB();
     tickClock();
-    document.getElementById('app').style.display='flex';
-    await loadAll();
+    await getAppPassword(); // ensure a password exists (defaults to 123456 on first run)
+    if(sessionStorage.getItem('vst_unlocked')==='1'){
+      showApp();
+      await loadAll();
+    } else {
+      showLoginScreen();
+    }
   }catch(e){
     console.error(e);
+    document.getElementById('app').style.display='flex';
     const root=document.getElementById('view-root');
     if(root) root.innerHTML='<div class="section-card"><h2>Unable to open local database</h2><p>Please use the latest Chrome or Edge and refresh the app.</p><button class="btn primary" onclick="location.reload()">↻ Refresh App</button></div>';
   }
